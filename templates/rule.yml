@@ -1,0 +1,29 @@
+title: <What is detected, Title Case, under 110 characters>
+id: <new UUIDv4: python3 -c "import uuid; print(uuid.uuid4())">
+status: experimental
+description: |
+    <One or two sentences: the behaviour and why it matters.>
+    <Which layer this is: attempt (the action is being tried) or effect (it succeeded).>
+references:
+    - <primary vendor documentation for the telemetry>
+    - <dataset used for testing, as a commit permalink>
+author: <your handle>
+date: <YYYY-MM-DD>
+tags:
+    - attack.<tactic>
+    - attack.<tXXXX.XXX>
+logsource:
+    product: windows
+    service: security            # or: category: process_creation
+    definition: 'Requirements: <audit policy or Sysmon configuration this needs>'
+detection:
+    selection:
+        EventID: <id>
+    filter_main_<reason>:          # filter_main_*: always-true exclusions
+        <Field>: <value>
+    filter_optional_<reason>:      # filter_optional_*: environment-specific exclusions
+        <Field>: <value>
+    condition: selection and not 1 of filter_main_* and not 1 of filter_optional_*
+falsepositives:
+    - <specific, recognisable situation - never just "Unknown" once the rule has been run on data>
+level: medium

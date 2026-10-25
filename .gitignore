@@ -1,0 +1,8 @@
+# Downloaded public datasets (verified by SHA-256 at test time)
+.cache/
+# Lab identifiers for scripts/sanitize_check.py - never commit
+.sanitize-patterns
+# Python
+__pycache__/
+*.pyc
+.venv/

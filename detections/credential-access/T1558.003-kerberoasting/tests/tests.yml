@@ -1,0 +1,99 @@
+# Test cases for the Kerberoasting detections.
+#
+# Datasets are public Splunk attack_data captures (XmlWinEventLog / WinEventLog, Security channel),
+# downloaded and checksum-verified at test time; nothing from the private lab is stored here.
+# event_ids keeps only 4769 so unrelated noise (e.g. 5156) in a capture does not affect counts.
+#
+# Expected counts were derived by profiling each dataset; see README "How it was tested".
+#
+# Counting semantics: a single-event rule counts matching events. A correlation rule counts alert
+# rows from the pySigma SQLite reference backend, which emits one row per qualifying sliding window,
+# so correlation expectations assert "fires" (>=1) or "silent" (0), never an exact number - the
+# Splunk query groups differently and exact alert counts are backend-specific.
+datasets:
+  rubeus:
+    url: https://media.githubusercontent.com/media/splunk/attack_data/master/datasets/attack_techniques/T1558.003/rubeus/windows-security.log
+    sha256: b5d694ca38e0ad78f779cfd91421cb37bf2514cbbc6c25afa7ac84c1b24e9313
+    event_ids: [4769]
+  unusual_number:
+    url: https://media.githubusercontent.com/media/splunk/attack_data/master/datasets/attack_techniques/T1558.003/unusual_number_of_kerberos_service_tickets_requested/windows-xml.log
+    sha256: e3e40630126969786c1a4c9cfcfea91773c5a4e3feb89cea28ac29fa6ef4117e
+    event_ids: [4769]
+  spn_rc4:
+    url: https://media.githubusercontent.com/media/splunk/attack_data/master/datasets/attack_techniques/T1558.003/kerberoasting_spn_request_with_rc4_encryption/windows-xml.log
+    sha256: fd4d9e35bd90964710a2f67bd90476ac69301310256bb319b16662aa04821d79
+    event_ids: [4769]
+  atomic_red_team:
+    url: https://media.githubusercontent.com/media/splunk/attack_data/master/datasets/attack_techniques/T1558.003/atomic_red_team/windows-security.log
+    sha256: 1647b6eb3c96c336463a2443a029a2f066d59501f2ffde62485a0d07e927cbd6
+    event_ids: [4769]
+
+cases:
+  - name: Rubeus kerberoast - 30 RC4 tickets for user-account SPNs (Splunk attack_data)
+    dataset: rubeus
+    expect:
+      # effect layer: every ticket is RC4 (0x17) for a user-account SPN -> all 30 fire
+      '854724c7-72d3-430a-8c1b-3c6005a2fe44': 30
+      # base rule of the correlation (any encryption type): all 30 requests are user-account SPNs
+      'ad72a164-2119-473e-88f7-e616ec48a6e5': 30
+      # attempt layer: one requester, 30 distinct services in ~2s -> fires
+      'ff9db41f-8fb0-4c26-af64-2dceddf3126b': '>=1'
+
+  - name: Same Rubeus run in an AES-only domain - encryption type rewritten to 0x12 at test time
+    dataset: rubeus
+    transform:
+      set: {TicketEncryptionType: '0x12'}   # what a post-2026 domain hands out by default
+    expect:
+      '854724c7-72d3-430a-8c1b-3c6005a2fe44': 0     # no RC4 -> effect layer silent by design
+      'ff9db41f-8fb0-4c26-af64-2dceddf3126b': '>=1' # attempt layer is encryption-agnostic -> fires
+
+  - name: Unusual number of service tickets - fake krbtgt-like SPNs (Splunk attack_data)
+    dataset: unusual_number
+    expect:
+      # 159 RC4 4769 events: 92 for the real 'krbtgt' (excluded), 67 for look-alike SPNs
+      # (k1rbtgt, kr5btgt ...). Exact-match exclusion of 'krbtgt' keeps the look-alikes.
+      '854724c7-72d3-430a-8c1b-3c6005a2fe44': 67
+      # only one of the two requesters reaches >=5 distinct services in 10 min (max 24);
+      # the other has 8 events spread over days (max 1 per window)
+      'ff9db41f-8fb0-4c26-af64-2dceddf3126b': '>=1'
+
+  - name: Single RC4 SPN ticket request (Splunk attack_data)
+    dataset: spn_rc4
+    expect:
+      '854724c7-72d3-430a-8c1b-3c6005a2fe44': 1
+      'ff9db41f-8fb0-4c26-af64-2dceddf3126b': 0   # one service only, below threshold
+
+  - name: Atomic Red Team - computer-account requester, service-account SPN (Splunk attack_data)
+    dataset: atomic_red_team
+    expect:
+      # ServiceName ends with '$' (computer account) -> excluded by design
+      '854724c7-72d3-430a-8c1b-3c6005a2fe44': 0
+      'ff9db41f-8fb0-4c26-af64-2dceddf3126b': 0
+
+  - name: Benign baseline - AES tickets and computer/krbtgt traffic (synthetic)
+    events: synthetic/benign_4769.jsonl
+    expect:
+      '854724c7-72d3-430a-8c1b-3c6005a2fe44': 0   # RC4 only for APPSRV02$ and krbtgt -> excluded
+      'ff9db41f-8fb0-4c26-af64-2dceddf3126b': 0   # no requester reaches 5 distinct user SPNs
+
+  - name: AES burst across a 10-minute bucket boundary - 6 SPNs in 3 minutes (synthetic)
+    events: synthetic/burst_across_bucket_boundary_aes.jsonl
+    expect:
+      '854724c7-72d3-430a-8c1b-3c6005a2fe44': 0     # AES -> effect layer silent by design
+      # Sigma semantics (sliding window) fires. NOTE: the sigma-cli Splunk output uses
+      # `bin _time span=10m` (fixed buckets) and splits this burst 3+3 -> silent.
+      # See README "Splunk deployment notes" for the streamstats variant.
+      'ff9db41f-8fb0-4c26-af64-2dceddf3126b': '>=1'
+
+  # Documented false positives: these cases prove the behaviour is understood, not that it is wanted.
+  - name: Known FP - application server using a legacy RC4-only service account (synthetic)
+    events: synthetic/known_fp_legacy_rc4_service.jsonl
+    expect:
+      '854724c7-72d3-430a-8c1b-3c6005a2fe44': 3   # fires every time; tune by allowlisting the SPN
+      'ff9db41f-8fb0-4c26-af64-2dceddf3126b': 0   # one service only -> burst stays silent
+
+  - name: Known FP - admin jump host touching 5 user-account SPNs in 5 minutes, AES (synthetic)
+    events: synthetic/fp_jump_host_aes.jsonl
+    expect:
+      '854724c7-72d3-430a-8c1b-3c6005a2fe44': 0     # AES tickets -> effect layer silent
+      'ff9db41f-8fb0-4c26-af64-2dceddf3126b': '>=1' # burst fires; tune by allowlisting the host

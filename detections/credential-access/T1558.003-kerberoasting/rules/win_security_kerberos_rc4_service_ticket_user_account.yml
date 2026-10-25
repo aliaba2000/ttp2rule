@@ -1,0 +1,43 @@
+title: Kerberos RC4 Service Ticket Issued For User Account SPN
+id: 854724c7-72d3-430a-8c1b-3c6005a2fe44
+status: experimental
+description: |
+    Detects a domain controller issuing a Kerberos service ticket encrypted with RC4 (0x17 RC4-HMAC or 0x18 RC4-HMAC-EXP)
+    for a service principal backed by a user account, i.e. not a computer account, gMSA or krbtgt.
+    Such a ticket is encrypted with the account's NT hash and can be cracked offline quickly (Kerberoasting).
+    This is the "effect" layer: a crackable ticket has actually been handed out.
+    Since the 2026 Kerberos hardening (CVE-2026-20833), domain controllers default to AES for accounts without an explicit
+    msDS-SupportedEncryptionTypes value, so an RC4 ticket for a user account SPN points either to an account deliberately
+    left on RC4 or to a domain-wide RC4 configuration - both worth reviewing.
+    Unlike similar rules, it does not exclude computer-account requesters and does not require specific ticket options,
+    because public Kerberoasting datasets show both conditions being bypassed by common tooling.
+references:
+    - https://learn.microsoft.com/windows-server/security/kerberos/detect-remediate-rc4-kerberos
+    - https://support.microsoft.com/en-us/topic/how-to-manage-kerberos-kdc-usage-of-rc4-for-service-account-ticket-issuance-changes-related-to-cve-2026-20833-1ebcda33-720a-4da8-93c1-b0496e1910dc
+    - https://github.com/splunk/attack_data/tree/115785491ca34054ac441a2ca9e87fba40b42a6b/datasets/attack_techniques/T1558.003
+author: aliaba2000
+date: 2026-10-24
+tags:
+    - attack.credential-access
+    - attack.t1558.003
+logsource:
+    product: windows
+    service: security
+    definition: 'Requirements: Audit Kerberos Service Ticket Operations (Success) on all domain controllers'
+detection:
+    selection:
+        EventID: 4769
+        Status: '0x0'
+        TicketEncryptionType:
+            - '0x17'  # RC4-HMAC
+            - '0x18'  # RC4-HMAC-EXP
+    filter_main_computer_and_gmsa:
+        ServiceName|endswith: '$'
+    filter_main_krbtgt:
+        ServiceName: 'krbtgt'
+    condition: selection and not 1 of filter_main_*
+falsepositives:
+    - Service accounts explicitly configured for RC4 in msDS-SupportedEncryptionTypes for legacy or non-Windows systems that cannot use AES
+    - Domains where DefaultDomainSupportedEncTypes was explicitly set to include RC4
+    - Accounts whose password predates AES key generation and therefore have no AES keys
+level: medium

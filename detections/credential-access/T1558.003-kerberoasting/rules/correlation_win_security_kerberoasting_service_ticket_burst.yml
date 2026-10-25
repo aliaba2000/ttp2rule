@@ -1,0 +1,62 @@
+title: Kerberos Service Ticket Requested For User Account SPN
+id: ad72a164-2119-473e-88f7-e616ec48a6e5
+name: kerberos_service_ticket_user_account_spn
+status: experimental
+description: |
+    Base rule for the Kerberoasting burst correlation defined below in this file.
+    Matches successful Kerberos service ticket requests (4769) for service principals backed by user accounts, i.e. not
+    computer accounts, gMSAs or krbtgt, regardless of the ticket encryption type.
+    On its own this is normal domain activity and is not meant to alert; the correlation rule counts distinct services per requester.
+author: aliaba2000
+date: 2026-10-24
+tags:
+    - attack.credential-access
+    - attack.t1558.003
+logsource:
+    product: windows
+    service: security
+    definition: 'Requirements: Audit Kerberos Service Ticket Operations (Success) on all domain controllers'
+detection:
+    selection:
+        EventID: 4769
+        Status: '0x0'
+    filter_main_computer_and_gmsa:
+        ServiceName|endswith: '$'
+    filter_main_krbtgt:
+        ServiceName: 'krbtgt'
+    condition: selection and not 1 of filter_main_*
+falsepositives:
+    - Expected - this is a base rule for a correlation and is not meant to alert on its own
+level: informational
+---
+title: Kerberoasting - Service Tickets Requested For Many User Account SPNs
+id: ff9db41f-8fb0-4c26-af64-2dceddf3126b
+status: experimental
+description: |
+    Detects one requester obtaining Kerberos service tickets for at least 5 distinct services running as user accounts
+    (distinct ServiceName values, i.e. service accounts) within 10 minutes.
+    This is the "attempt" layer: it describes the collection step of Kerberoasting regardless of the ticket encryption type,
+    so it keeps working after RC4 is disabled and tickets are AES-encrypted (slower to crack, still crackable).
+    Grouping by account and source address separates one compromised identity on one host from normal multi-user activity.
+references:
+    - https://github.com/splunk/attack_data/tree/115785491ca34054ac441a2ca9e87fba40b42a6b/datasets/attack_techniques/T1558.003
+author: aliaba2000
+date: 2026-10-24
+tags:
+    - attack.credential-access
+    - attack.t1558.003
+correlation:
+    type: value_count
+    rules:
+        - kerberos_service_ticket_user_account_spn
+    group-by:
+        - TargetUserName
+        - IpAddress
+    timespan: 10m
+    condition:
+        field: ServiceName
+        gte: 5
+falsepositives:
+    - Jump hosts, application servers or monitoring systems that legitimately connect to many services backed by user accounts
+    - Security tooling that enumerates SPNs and requests tickets (authorised assessments)
+level: medium

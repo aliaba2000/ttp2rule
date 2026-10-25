@@ -1,0 +1,83 @@
+# pySigma processing pipeline for Splunk Windows event logs.
+#
+# Why not the stock `splunk_windows` pipeline: it adds source="WinEventLog:<channel>",
+# which matches only the classic text rendering. With renderXml = true (sourcetype
+# XmlWinEventLog, recommended by the Splunk Add-on for Microsoft Windows) the source is
+# "XmlWinEventLog:<channel>", and the stock query silently returns nothing.
+# This pipeline accepts both renderings and maps EventID to Splunk's EventCode.
+#
+# Usage (Sysmon rules also need the generic-to-Sysmon pipeline first):
+#   sigma convert -t splunk -p pipelines/splunk_windows_xml.yml rule.yml
+#   sigma convert -t splunk -p sysmon -p pipelines/splunk_windows_xml.yml rule.yml
+#
+# Index selection is deliberately left out: it is environment-specific and belongs in the
+# saved search or a macro, not in a portable query.
+name: ttp2rule - Splunk Windows event logs (classic and XML rendering)
+priority: 20
+transformations:
+  - id: windows_security_source
+    type: add_condition
+    conditions:
+      source:
+        - 'WinEventLog:Security'
+        - 'XmlWinEventLog:Security'
+    rule_conditions:
+      - type: logsource
+        product: windows
+        service: security
+  - id: windows_system_source
+    type: add_condition
+    conditions:
+      source:
+        - 'WinEventLog:System'
+        - 'XmlWinEventLog:System'
+    rule_conditions:
+      - type: logsource
+        product: windows
+        service: system
+  - id: windows_powershell_source
+    type: add_condition
+    conditions:
+      source:
+        - 'WinEventLog:Microsoft-Windows-PowerShell/Operational'
+        - 'XmlWinEventLog:Microsoft-Windows-PowerShell/Operational'
+    rule_conditions:
+      - type: logsource
+        product: windows
+        service: powershell
+  - id: windows_ps_script_source
+    type: add_condition
+    conditions:
+      source:
+        - 'WinEventLog:Microsoft-Windows-PowerShell/Operational'
+        - 'XmlWinEventLog:Microsoft-Windows-PowerShell/Operational'
+      EventID: 4104
+    rule_conditions:
+      - type: logsource
+        product: windows
+        category: ps_script
+  - id: windows_ps_module_source
+    type: add_condition
+    conditions:
+      source:
+        - 'WinEventLog:Microsoft-Windows-PowerShell/Operational'
+        - 'XmlWinEventLog:Microsoft-Windows-PowerShell/Operational'
+      EventID: 4103
+    rule_conditions:
+      - type: logsource
+        product: windows
+        category: ps_module
+  - id: windows_sysmon_source
+    type: add_condition
+    conditions:
+      source:
+        - 'WinEventLog:Microsoft-Windows-Sysmon/Operational'
+        - 'XmlWinEventLog:Microsoft-Windows-Sysmon/Operational'
+    rule_conditions:
+      - type: logsource
+        product: windows
+        service: sysmon
+  - id: eventid_to_eventcode
+    type: field_name_mapping
+    mapping:
+      EventID: EventCode
